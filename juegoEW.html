@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Windows Desktop Adventure - Ultimate</title>
+    <style>
+        body {
+            margin: 0; padding: 0; overflow: hidden;
+            background: #0078D7;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            user-select: none;
+        }
+        #game-container {
+            position: relative; width: 100vw; height: 100vh;
+            display: flex; justify-content: center; align-items: center;
+        }
+        canvas {
+            background: linear-gradient(to bottom, #1e90ff, #87cefa);
+            box-shadow: 0 0 30px rgba(0,0,0,0.5); display: block;
+            outline: none; 
+        }
+        #hud {
+            position: absolute; top: 0; left: 0; width: 100%;
+            padding: 20px; box-sizing: border-box;
+            display: flex; justify-content: space-between; align-items: flex-start;
+            color: white; pointer-events: none; z-index: 10;
+        }
+        .hud-stats {
+            font-size: 24px; font-weight: bold;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.7);
+        }
+        #hud-restart-btn {
+            background: rgba(255, 255, 255, 0.2);
+            color: white; border: 1px solid rgba(255, 255, 255, 0.5);
+            padding: 10px 20px; border-radius: 4px; cursor: pointer;
+            font-size: 16px; font-weight: bold; pointer-events: auto;
+            backdrop-filter: blur(5px); transition: background 0.2s;
+        }
+        #hud-restart-btn:hover { background: rgba(255, 255, 255, 0.3); }
+        #hud-restart-btn:active { transform: scale(0.95); }
+
+        #quiz-overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.4); 
+            display: none;
+            justify-content: center; align-items: center; z-index: 20;
+        }
+        .quiz-card {
+            background: white; padding: 30px; border-radius: 12px;
+            max-width: 500px; width: 90%; text-align: center;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+        }
+        .options-container { display: flex; flex-direction: column; gap: 10px; margin: 20px 0; }
+        .option-btn {
+            padding: 12px; border: 2px solid #0078D7; background: #fff;
+            border-radius: 6px; cursor: pointer; font-size: 16px; font-weight: bold;
+        }
+        .option-btn:hover:not(:disabled) { background: #0078D7; color: white; }
+        .option-btn:disabled { opacity: 0.8; cursor: default; }
+        #feedback-area {
+            margin-top: 15px; padding: 15px; border-radius: 6px;
+            display: none; font-weight: bold; font-size: 18px;
+        }
+        .feedback-correct { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .feedback-incorrect { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        
+        .submit-btn {
+            background: #28a745; color: white; border: none;
+            padding: 15px 30px; border-radius: 6px; cursor: pointer; font-size: 18px; font-weight: bold;
+            box-shadow: 0 4px 0 #1e7e34;
+        }
+        .submit-btn:active { transform: translateY(2px); box-shadow: 0 2px 0 #1e7e34; }
+        
+        #msg-box {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            background: white; padding: 40px; border-radius: 12px;
+            display: none; text-align: center; z-index: 1000; 
+            box-shadow: 0 0 100px rgba(0,0,0,0.8);
+            border: 4px solid #0078D7;
+        }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <div id="hud">
+        <div class="hud-stats">Puntos: <span id="score">0</span> | Vidas: <span id="lives">3</span></div>
+        <button id="hud-restart-btn">REINICIAR</button>
+    </div>
+    <canvas id="gameCanvas" tabindex="0"></canvas>
+    
+    <div id="quiz-overlay">
+        <div class="quiz-card">
+            <div id="quiz-content"></div>
+            <div id="feedback-area"></div>
+        </div>
+    </div>
+
+    <div id="msg-box">
+        <h2 id="msg-title"></h2>
+        <p id="msg-body" style="font-size: 20px; margin-bottom: 30px;"></p>
+        <button class="submit-btn" id="final-restart-btn">REINICIAR JUEGO</button>
+    </div>
+</div>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    canvas.width = 1000;
+    canvas.height = 600;
+
+    const scoreEl = document.getElementById('score');
+    const livesEl = document.getElementById('lives');
+    const quizOverlay = document.getElementById('quiz-overlay');
+    const quizContent = document.getElementById('quiz-content');
+    const feedbackArea = document.getElementById('feedback-area');
+    const msgBox = document.getElementById('msg-box');
+    
+    const hudRestartBtn = document.getElementById('hud-restart-btn');
+    const finalRestartBtn = document.getElementById('final-restart-btn');
+
+    let gameState = 'playing'; 
+    let score = 0;
+    let lives = 3;
+    let currentBlock = null;
+    let camX = 0;
+    const worldWidth = 12000;
+
+    const questions = [
+        { q: "¿Cuál es el atajo para ver el escritorio rápidamente?", options: ["Win + D", "Alt + F4", "Ctrl + C"], correct: "Win + D" },
+        { q: "¿Cómo se llama la barra inferior de Windows?", options: ["Barra de Tareas", "Barra de Menú", "Barra de Estado"], correct: "Barra de Tareas" },
+        { q: "¿Qué icono representa la papelera de reciclaje por defecto?", options: ["Un bote de basura", "Una carpeta", "Un disco duro"], correct: "Un bote de basura" },
+        { q: "¿En qué lado de la barra de tareas se encuentra la barra de notificaciones?", options: ["Derecha", "Izquierda", "Centro"], correct: "Derecha" },
+        { q: "¿Qué combinación abre el Explorador de Archivos?", options: ["Win + E", "Win + X", "Ctrl + E"], correct: "Win + E" },
+        { q: "¿Donde se encuentra el botón de Inicio?", options: ["Al lado izquierdo del cuadro de busqueda", "Centro", "Esquina superior derecha"], correct: "Al lado izquierdo del cuadro de busqueda" },
+        { q: "¿Dónde se ubica normalmente el icono de Widgets en Windows 11?", options: ["Extremo izquierdo de la barra de tareas", "Esquina superior derecha", "Dentro de la papelera"], correct: "Extremo izquierdo de la barra de tareas" },
+        { q: "¿Cómo se llama el fondo de pantalla en Windows?", options: ["Papel Tapiz", "Capa de Sistema", "Skin"], correct: "Papel Tapiz" },
+        { q: "¿Qué herramienta permite buscar archivos y apps?", options: ["Cuadro de Búsqueda", "Calculadora", "Paint"], correct: "Cuadro de Búsqueda" },
+        { q: "¿Para qué utilizarían ustedes el escritorio de Windows?", type: "open" }
+    ];
+
+    function shuffleArray(array) {
+        let arr = [...array];
+        for (let i = arr.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [arr[i], arr[j]] = [arr[j], arr[i]];
+        }
+        return arr;
+    }
+
+    const keys = {};
+    window.addEventListener('keydown', e => keys[e.key] = true);
+    window.addEventListener('keyup', e => keys[e.key] = false);
+
+    const GRAVITY = 0.5; 
+    const MAX_FALL_SPEED = 12;
+
+    class Player {
+        constructor() {
+            this.width = 32;
+            this.height = 32;
+            this.resetPosition();
+            this.speed = 6.8; 
+            this.jumpForce = 14.8; 
+            this.grounded = false;
+            this.invulnerableTimer = 0;
+        }
+        resetPosition() {
+            this.x = 100;
+            this.y = 300;
+            this.velX = 0;
+            this.velY = 0;
+        }
+        update() {
+            if (gameState !== 'playing') return;
+            if (this.invulnerableTimer > 0) this.invulnerableTimer--;
+            if (keys['ArrowLeft'] || keys['a']) this.velX = -this.speed;
+            else if (keys['ArrowRight'] || keys['d']) this.velX = this.speed;
+            else this.velX = 0;
+            if ((keys['ArrowUp'] || keys['w'] || keys[' ']) && this.grounded) {
+                this.velY = -this.jumpForce;
+                this.grounded = false;
+            }
+            this.velY += GRAVITY;
+            if (this.velY > MAX_FALL_SPEED) this.velY = MAX_FALL_SPEED;
+            this.x += this.velX;
+            if (this.x < 0) this.x = 0;
+            if (this.x > worldWidth - this.width) this.x = worldWidth - this.width;
+            for (let p of solids) {
+                if (checkAABB(this, p)) {
+                    if (this.velX > 0) this.x = p.x - this.width;
+                    else if (this.velX < 0) this.x = p.x + p.width;
+                    this.velX = 0;
+                }
+            }
+            this.y += this.velY;
+            this.grounded = false;
+            for (let p of solids) {
+                if (checkAABB(this, p)) {
+                    if (this.velY > 0) {
+                        this.y = p.y - this.height;
+                        this.velY = 0;
+                        this.grounded = true;
+                    } else if (this.velY < 0) {
+                        this.y = p.y + p.height;
+                        this.velY = 0;
+                        if (p.isBlock && p.active) {
+                            p.active = false;
+                            triggerQuiz(p);
+                        }
+                    }
+                }
+            }
+            if (this.y > 650) takeDamage(true);
+        }
+        draw(camX) {
+            if (this.invulnerableTimer > 0 && Math.floor(Date.now() / 80) % 2 === 0) return;
+            ctx.fillStyle = '#fff';
+            ctx.fillRect(this.x - camX, this.y, this.width, this.height);
+            ctx.fillStyle = '#0078D7';
+            ctx.fillRect(this.x - camX + 4, this.y + 4, this.width - 8, this.height - 12);
+        }
+    }
+
+    class SolidObject {
+        constructor(x, y, width, height, isBlock = false, qIndex = -1) {
+            this.x = x; this.y = y; this.width = width; this.height = height;
+            this.isBlock = isBlock;
+            this.active = true;
+            this.qIndex = qIndex;
+        }
+        draw(camX) {
+            if (this.isBlock) {
+                if (this.active) {
+                    ctx.fillStyle = '#FFD700';
+                    ctx.fillRect(this.x - camX, this.y, this.width, this.height);
+                    ctx.fillStyle = '#000'; ctx.font = 'bold 22px Arial';
+                    ctx.fillText('?', this.x - camX + 13, this.y + 28);
+                } else {
+                    ctx.fillStyle = '#444'; 
+                    ctx.fillRect(this.x - camX, this.y, this.width, this.height);
+                }
+                ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
+                ctx.strokeRect(this.x - camX, this.y, this.width, this.height);
+            } else {
+                ctx.fillStyle = '#ffffffaa';
+                ctx.fillRect(this.x - camX, this.y, this.width, this.height);
+                ctx.fillStyle = '#fff';
+                ctx.fillRect(this.x - camX, this.y, this.width, 5);
+            }
+        }
+    }
+
+    class Enemy {
+        constructor(x, y, walkDistance) {
+            this.width = 34; this.height = 34;
+            this.startX = x;
+            this.x = x;
+            this.y = y - this.height;
+            this.walkDistance = walkDistance;
+            this.speed = 1.2; 
+            this.dir = 1;
+            this.alive = true;
+        }
+        update() {
+            if (!this.alive || gameState !== 'playing') return;
+            this.x += this.speed * this.dir;
+            if (Math.abs(this.x - this.startX) >= this.walkDistance) this.dir *= -1;
+        }
+        draw(camX) {
+            if (!this.alive) return;
+            ctx.fillStyle = '#900';
+            ctx.fillRect(this.x - camX, this.y, this.width, this.height);
+            ctx.fillStyle = '#f00';
+            ctx.fillRect(this.x - camX + 5, this.y + 7, 7, 7);
+            ctx.fillRect(this.x - camX + 22, this.y + 7, 7, 7);
+        }
+    }
+
+    function checkAABB(a, b) {
+        return a.x < b.x + b.width && a.x + a.width > b.x &&
+               a.y < b.y + b.height && a.y + a.height > b.y;
+    }
+
+    let player = new Player();
+    let solids = [];
+    let enemies = [];
+    
+    function initMap() {
+        solids = [];
+        enemies = [];
+        for(let i = 0; i < 7; i++) {
+            solids.push(new SolidObject(i * 1800, 520, 1700, 100));
+        }
+        const mapConfig = [
+            { x: 500, q: 0 },   { x: 1600, q: 1 },  { x: 2700, q: 2 },
+            { x: 3800, q: 3 },  { x: 4900, q: 4 },  { x: 6000, q: 5 },
+            { x: 7100, q: 6 },  { x: 8200, q: 7 },  { x: 9300, q: 8 },
+            { x: 10500, q: 9 }
+        ];
+        mapConfig.forEach(cfg => {
+            solids.push(new SolidObject(cfg.x - 150, 400, 300, 25));
+            solids.push(new SolidObject(cfg.x - 22, 250, 45, 45, true, cfg.q));
+            solids.push(new SolidObject(cfg.x + 350, 350, 200, 25));
+            solids.push(new SolidObject(cfg.x + 700, 420, 200, 25));
+            enemies.push(new Enemy(cfg.x + 200, 520, 300));
+        });
+    }
+
+    function checkEnemyCollisions() {
+        for (let e of enemies) {
+            if (!e.alive) continue;
+            if (checkAABB(player, e)) {
+                if (player.velY > 0 && player.y + player.height - player.velY <= e.y + 20) {
+                    e.alive = false;
+                    player.velY = -12;
+                } else {
+                    takeDamage(false);
+                }
+            }
+        }
+    }
+
+    function takeDamage(fell) {
+        if (player.invulnerableTimer > 0 && !fell) return;
+        lives--;
+        livesEl.innerText = lives;
+        if (lives <= 0) {
+            endGame("¡SISTEMA CAÍDO!", `Te has quedado sin vidas. Puntos: ${score}`);
+        } else {
+            if (fell) player.resetPosition();
+            else {
+                player.invulnerableTimer = 100;
+                player.velY = -8;
+            }
+        }
+    }
+
+    function triggerQuiz(block) {
+        gameState = 'paused';
+        currentBlock = block;
+        const qData = questions[block.qIndex];
+        feedbackArea.style.display = 'none';
+        
+        let html = `<h3>Desafío #${block.qIndex + 1}</h3><p style="font-size:1.2em;">${qData.q}</p>`;
+        if (qData.type === 'open') {
+            html += `<textarea id="open-question-input" rows="3" style="width:100%; margin-bottom:10px; padding:10px; box-sizing:border-box; border:1px solid #ccc; border-radius:4px;" placeholder="Escribe aquí..."></textarea>
+                     <button class="submit-btn" id="quiz-submit-btn">Enviar</button>`;
+        } else {
+            const opts = shuffleArray(qData.options);
+            html += `<div class="options-container">`;
+            opts.forEach(o => {
+                html += `<button class="option-btn quiz-opt">${o}</button>`;
+            });
+            html += `</div>`;
+        }
+        quizContent.innerHTML = html;
+        quizOverlay.style.display = 'flex';
+
+        if (qData.type === 'open') {
+            document.getElementById('quiz-submit-btn').onclick = () => processAnswer(true);
+        } else {
+            document.querySelectorAll('.quiz-opt').forEach(btn => {
+                btn.onclick = () => processAnswer(btn.innerText === qData.correct);
+            });
+        }
+    }
+
+    function processAnswer(correct) {
+        const btns = document.querySelectorAll('.option-btn, .submit-btn');
+        btns.forEach(b => b.disabled = true);
+        
+        feedbackArea.style.display = 'block';
+        
+        if (correct) {
+            score += 1; 
+            scoreEl.innerText = score;
+            feedbackArea.className = 'feedback-correct';
+            feedbackArea.innerText = "¡Correcto! +1 punto.";
+        } else {
+            feedbackArea.className = 'feedback-incorrect';
+            feedbackArea.innerText = "Incorrecto.";
+        }
+
+        setTimeout(() => {
+            quizOverlay.style.display = 'none';
+            
+            if (currentBlock.qIndex === 9) {
+                // Pantalla final sin botón de reinicio
+                endGame("¡NIVEL COMPLETADO!", `¡Excelente trabajo! Has terminado todos los desafíos. Puntos totales: ${score}`, true);
+            } else {
+                gameState = 'playing';
+                canvas.focus();
+            }
+        }, 1000); 
+    }
+
+    function endGame(title, msg, isWin = false) {
+        gameState = 'ended';
+        document.getElementById('msg-title').innerText = title;
+        document.getElementById('msg-body').innerText = msg;
+        
+        // Si gana (isWin es true), escondemos el botón de reinicio de la ventana final
+        if (isWin) {
+            finalRestartBtn.style.display = 'none';
+        } else {
+            finalRestartBtn.style.display = 'inline-block';
+        }
+        
+        msgBox.style.display = 'block';
+    }
+
+    function handleRestart() {
+        msgBox.style.display = 'none';
+        quizOverlay.style.display = 'none';
+        
+        score = 0;
+        lives = 3;
+        camX = 0;
+        scoreEl.innerText = "0";
+        livesEl.innerText = "3";
+        
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        player = new Player();
+        initMap();
+        
+        gameState = 'playing';
+
+        if (document.activeElement) {
+            document.activeElement.blur(); 
+        }
+        canvas.focus(); 
+    }
+
+    hudRestartBtn.onclick = handleRestart;
+    finalRestartBtn.onclick = handleRestart;
+
+    function gameLoop() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        let targetCamX = Math.max(0, Math.min(player.x - 450, worldWidth - canvas.width));
+        camX += (targetCamX - camX) * 0.1;
+
+        if (gameState === 'playing' || gameState === 'paused') {
+            player.update();
+            if (gameState === 'playing') checkEnemyCollisions();
+            solids.forEach(s => s.draw(camX));
+            enemies.forEach(e => { e.update(); e.draw(camX); });
+            player.draw(camX);
+        } else if (gameState === 'ended') {
+            solids.forEach(s => s.draw(camX));
+            enemies.forEach(e => e.draw(camX));
+            player.draw(camX);
+        }
+        requestAnimationFrame(gameLoop);
+    }
+
+    initMap();
+    gameLoop();
+    canvas.focus();
+</script>
+</body>
+</html>
